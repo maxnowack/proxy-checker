@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -16,15 +17,13 @@ import (
 )
 
 type ProxyDoc struct {
-	_id primitive.ObjectID
-	url string
+	Url string `bson:"url" json:"url"`
 }
 
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
-		os.Exit(1)
+		log.Println("No .env file found. Just using environment variables")
 	}
 
 	port := os.Getenv("PORT")
@@ -32,12 +31,78 @@ func main() {
 		port = "8080"
 	}
 
-	http.HandleFunc("/", proxyServer)
-	go http.ListenAndServe(":"+port, nil)
-	log.Println("http server listening on port " + port)
-
+	go startProxyChecking()
 	log.Println("started proxy checking")
-	startProxyChecking()
+
+	log.Println("http server listening on port " + port)
+	http.HandleFunc("/", proxyServer)
+	http.ListenAndServe(":"+port, nil)
+}
+
+func processProxy() {
+	proxies := getMongo()
+
+	findOptions := options.Find()
+	findOptions.SetSort(bson.D{{"checkedAt", 1}})
+	findOptions.SetProjection(bson.D{{"url", 1}})
+	findOptions.SetSkip(int64(randomBetween(0, 100)))
+	findOptions.SetLimit(1)
+
+	cur, err := proxies.Find(context.TODO(), bson.D{}, findOptions)
+	if err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+
+	for cur.Next(context.TODO()) {
+		var proxy ProxyDoc
+		err := cur.Decode(&proxy)
+		if err != nil {
+			log.Fatal(err)
+			os.Exit(1)
+		}
+		cur.Close(context.TODO())
+
+		if proxy.Url == "" {
+			log.Fatal("Empty proxy url!")
+			os.Exit(1)
+		}
+
+		info := checkProxy(proxy.Url)
+		var errString string
+		if info.err != nil {
+			errString = info.err.Error()
+		}
+		_, err = proxies.UpdateOne(context.TODO(), bson.M{
+			"url": proxy.Url,
+		}, bson.M{
+			"$set": bson.M{
+				"success":          info.success,
+				"error":            errString,
+				"speedUp":          info.speedUp,
+				"speedDown":        info.speedDown,
+				"dnsLookup":        info.dnsLookup,
+				"tcpConnection":    info.tcpConnection,
+				"tlsHandshake":     info.tlsHandshake,
+				"serverProcessing": info.serverProcessing,
+				"remoteIP":         info.remoteIP,
+				"checkedAt":        primitive.NewDateTimeFromTime(time.Now()),
+			},
+		})
+
+		if err != nil {
+			log.Fatal(err)
+			os.Exit(1)
+		}
+		return
+	}
+	if err := cur.Err(); err != nil {
+		log.Fatal(err)
+		os.Exit(1)
+	}
+
+	log.Println("No proxies available")
+	os.Exit(0)
 }
 
 func startProxyChecking() {
@@ -47,49 +112,19 @@ func startProxyChecking() {
 		os.Exit(1)
 	}
 
-	db := getMongo()
-	proxies := db.Collection("proxies")
-
-	sem := make(chan bool, concurrency)
-	for i := 0; i < cap(sem); i++ {
-		sem <- true
-	}
-	for {
-		sem <- true
-		go func() {
-			defer func() { <-sem }()
-
-			ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-			opts := options.FindOne()
-			opts.SetSort(bson.D{{"checkedAt", 1}})
-			var proxy ProxyDoc
-			proxies.FindOne(ctx, bson.M{}, opts).Decode(&proxy)
-
-			info := checkProxy(proxy.url)
-
-			_, err := proxies.UpdateOne(ctx, bson.M{
-				"_id": proxy._id,
-			}, bson.D{
-				{"$set", bson.D{
-					{"success", info.success},
-					{"error", info.err},
-					{"speedUp", info.speedUp},
-					{"speedDown", info.speedDown},
-					{"dnsLookup", info.dnsLookup},
-					{"tcpConnection", info.tcpConnection},
-					{"tlsHandshake", info.tlsHandshake},
-					{"serverProcessing", info.serverProcessing},
-					{"contentTransfer", info.contentTransfer},
-					{"checkedAt", primitive.NewDateTimeFromTime(time.Now())},
-				}},
-			})
-
-			if err != nil {
-				log.Fatal(err)
-				os.Exit(1)
+	wg := sync.WaitGroup{}
+	for worker := 0; worker < concurrency; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			for {
+				defer wg.Done()
+				processProxy()
+				wg.Add(1)
 			}
-		}()
+		}(worker)
 	}
+
+	wg.Wait()
 }
 
 func proxyServer(w http.ResponseWriter, r *http.Request) {

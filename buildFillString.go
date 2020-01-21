@@ -1,9 +1,14 @@
 package main
 
+import (
+	"strings"
+)
+
 func buildFillString(length int) string {
-	str := ""
+	var b strings.Builder
+	b.Grow(length)
 	for i := 0; i < length; i++ {
-		str = str + "0"
+		b.WriteString("0")
 	}
-	return str
+	return b.String()
 }

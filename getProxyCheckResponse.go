@@ -3,19 +3,21 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"time"
 )
 
 type ResponseData struct {
-	requestTime uint64
-	currentTime uint64
-	fill        string
+	RequestTime float64 `bson:"requestTime" json:"requestTime"`
+	CurrentTime float64 `bson:"currentTime" json:"currentTime"`
+	RemoteIP    string  `bson:"remoteIp" json:"remoteIp"`
+	Fill        string  `bson:"fill" json:"fill"`
 }
 
-func getTimestampMs() uint64 {
+func getTimestampMs() float64 {
 	now := time.Now()
-	return uint64(now.UnixNano() / 1000000)
+	return float64(now.UnixNano()) / 1000000.0
 }
 
 var responseLength = 1024 * 1024 // 1MB
@@ -31,10 +33,14 @@ func getProxyCheckResponse(r *http.Request) (string, error) {
 	json.Unmarshal([]byte(jsonStr), &data)
 
 	currentTime := getTimestampMs()
+	remoteIp := r.Header.Get("x-forwarded-for")
+
+	log.Println("request from ", remoteIp)
 
 	respData := ResponseData{
-		currentTime - data.currentTime,
+		currentTime - data.CurrentTime,
 		currentTime,
+		remoteIp,
 		"",
 	}
 	jsonData, err := json.Marshal(respData)
@@ -43,8 +49,9 @@ func getProxyCheckResponse(r *http.Request) (string, error) {
 	}
 
 	respData = ResponseData{
-		currentTime - data.currentTime,
+		currentTime - data.CurrentTime,
 		currentTime,
+		remoteIp,
 		buildFillString(responseLength - len(jsonData)),
 	}
 	jsonData, err = json.Marshal(respData)

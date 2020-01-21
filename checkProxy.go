@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -12,8 +13,8 @@ import (
 )
 
 type RequestData struct {
-	currentTime uint64
-	fill        string
+	CurrentTime float64 `bson:"currentTime" json:"currentTime"`
+	Fill        string  `bson:"fill" json:"fill"`
 }
 
 type returnValue struct {
@@ -26,7 +27,7 @@ type returnValue struct {
 	tcpConnection    float64
 	tlsHandshake     float64
 	serverProcessing float64
-	contentTransfer  float64
+	remoteIP         string
 }
 
 type speedInfo struct {
@@ -36,7 +37,7 @@ type speedInfo struct {
 	tcpConnection    float64
 	tlsHandshake     float64
 	serverProcessing float64
-	contentTransfer  float64
+	remoteIP         string
 }
 
 var requestLength = 1024 * 1024 // 1MB
@@ -69,7 +70,7 @@ func doTestRequest(httpClient *http.Client) (speedInfo, error) {
 		return speed, err
 	}
 
-	req, err := http.NewRequest("GET", os.Getenv("ROOT_URL")+"/checkProxy", nil)
+	req, err := http.NewRequest("POST", os.Getenv("ROOT_URL")+"/checkProxy", nil)
 	if err != nil {
 		return speed, err
 	}
@@ -87,16 +88,20 @@ func doTestRequest(httpClient *http.Client) (speedInfo, error) {
 	jsonStr, err := ioutil.ReadAll(resp.Body)
 
 	var data ResponseData
-	json.Unmarshal([]byte(jsonStr), &data)
+	json.Unmarshal(jsonStr, &data)
+
+	if data.RequestTime == 0 {
+		return speed, errors.New("invalid response")
+	}
 
 	speed = speedInfo{
-		speedUp:          float64(1000 / data.requestTime),
-		speedDown:        float64(1000 / (getTimestampMs() - data.currentTime)),
+		speedUp:          float64(1000.0 / data.RequestTime),
+		speedDown:        float64(1000.0 / (getTimestampMs() - data.CurrentTime)),
 		dnsLookup:        float64(result.DNSLookup / time.Millisecond),
 		tcpConnection:    float64(result.TCPConnection / time.Millisecond),
 		tlsHandshake:     float64(result.TLSHandshake / time.Millisecond),
 		serverProcessing: float64(result.ServerProcessing / time.Millisecond),
-		contentTransfer:  float64(result.ContentTransfer(time.Now()) / time.Millisecond),
+		remoteIP:         data.RemoteIP,
 	}
 
 	return speed, nil
@@ -120,7 +125,7 @@ func checkProxy(url string) returnValue {
 	retVal.tcpConnection = info.tcpConnection
 	retVal.tlsHandshake = info.tlsHandshake
 	retVal.serverProcessing = info.serverProcessing
-	retVal.contentTransfer = info.contentTransfer
+	retVal.remoteIP = info.remoteIP
 
 	// check sites (parallel (sync.WaitGroup))
 
