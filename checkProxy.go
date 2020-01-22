@@ -43,9 +43,12 @@ type speedInfo struct {
 var requestLength = 1024 * 1024 // 1MB
 
 func getSocksClient(url string) *http.Client {
-	dialSocksProxy := socks.Dial(url)
+	dialSocksProxy := socks.Dial(url + "/?timeout=30s")
 	tr := &http.Transport{Dial: dialSocksProxy}
-	return &http.Client{Transport: tr}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   30 * time.Second,
+	}
 }
 
 func doTestRequest(httpClient *http.Client) (speedInfo, error) {

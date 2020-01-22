@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"time"
 )
@@ -33,14 +32,12 @@ func getProxyCheckResponse(r *http.Request) (string, error) {
 	json.Unmarshal([]byte(jsonStr), &data)
 
 	currentTime := getTimestampMs()
-	remoteIp := r.Header.Get("x-forwarded-for")
-
-	log.Println("request from ", remoteIp)
+	remoteIP := r.Header.Get("x-forwarded-for")
 
 	respData := ResponseData{
 		currentTime - data.CurrentTime,
 		currentTime,
-		remoteIp,
+		remoteIP,
 		"",
 	}
 	jsonData, err := json.Marshal(respData)
@@ -51,7 +48,7 @@ func getProxyCheckResponse(r *http.Request) (string, error) {
 	respData = ResponseData{
 		currentTime - data.CurrentTime,
 		currentTime,
-		remoteIp,
+		remoteIP,
 		buildFillString(responseLength - len(jsonData)),
 	}
 	jsonData, err = json.Marshal(respData)

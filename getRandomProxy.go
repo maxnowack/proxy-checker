@@ -14,7 +14,7 @@ import (
 func findProxies() []ProxyDoc {
 	proxies := getMongo()
 
-	leastChecked := time.Now().Add(time.Hour * -1)
+	leastChecked := time.Now().Add((12 * time.Hour) * -1)
 	query := bson.M{
 		"success": true,
 		"checkedAt": bson.M{
@@ -22,7 +22,7 @@ func findProxies() []ProxyDoc {
 		},
 	}
 	findOptions := options.Find()
-	findOptions.SetSort(bson.D{{"speedDown", -1}})
+	findOptions.SetSort(bson.D{{"tlsHandshake", 1}})
 	findOptions.SetProjection(bson.D{{"url", 1}})
 	findOptions.SetLimit(100)
 
@@ -49,6 +49,10 @@ func findProxies() []ProxyDoc {
 func getRandomProxy() string {
 	// find({ working: true, checkedAt: { $gte: (now - 1h) } }, { sort: { quality: -1 }, limit: 100 })
 	proxies := findProxies()
+	if len(proxies) <= 0 {
+		log.Fatal("No proxies found!")
+		os.Exit(1)
+	}
 	// proxy := gaussianRandomElement(proxies, 2, 0.001).Interface().(ProxyDoc)
 	proxy := randomElement(proxies).Interface().(ProxyDoc)
 	return proxy.Url

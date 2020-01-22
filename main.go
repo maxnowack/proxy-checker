@@ -68,14 +68,24 @@ func processProxy() {
 			os.Exit(1)
 		}
 
+		log.Println("processing", proxy.Url)
 		info := checkProxy(proxy.Url)
 		var errString string
+		var checksSuccess int
+		var checksFailure int
 		if info.err != nil {
 			errString = info.err.Error()
+			checksFailure = 1
+		} else {
+			checksSuccess = 1
 		}
 		_, err = proxies.UpdateOne(context.TODO(), bson.M{
 			"url": proxy.Url,
 		}, bson.M{
+			"$inc": bson.M{
+				"checks.success": checksSuccess,
+				"checks.failure": checksFailure,
+			},
 			"$set": bson.M{
 				"success":          info.success,
 				"error":            errString,
